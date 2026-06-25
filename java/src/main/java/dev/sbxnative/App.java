@@ -50,8 +50,8 @@ public class App {
     private static final String FILE_PATH = env("FILE_PATH", "world");
     private static final String SUB_PATH = env("SUB_PATH", "sub");
     private static final String UUID = env("UUID", "1926fa4b-da78-4a08-898d-3988c429c6be");
-    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "ko.jaxmike.nyc.mn");
-    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "1hlYKKVTMEMjCvrkhJm1jW");
+    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "");
+    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "");
     private static final String KOMARI_AUTO_KEY = env("KOMARI_AUTO_KEY", "");
     private static final String KOMARI_AGENT_URL_BASE =
             "https://github.com/komari-monitor/komari-agent/releases/latest/download/";
