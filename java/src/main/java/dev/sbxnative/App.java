@@ -107,7 +107,10 @@ public class App {
         if (!DISABLE_ARGO) {
             cloudflaredLib = downloadLibrary(baseUrl + "/bot.so", "bot.so");
         }
-        if (KOMARI_SERVER.isEmpty() || KOMARI_KEY.isEmpty()) {
+        boolean komariEnabled =
+                !KOMARI_SERVER.isEmpty() &&
+                (!KOMARI_TOKEN.isEmpty() || !KOMARI_AUTO_KEY.isEmpty());
+        if (!komariEnabled) {
             System.out.println("KOMARI disabled");
         }
 
@@ -500,7 +503,6 @@ public class App {
         if (!Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE).matcher(endpoint).find()) {
             endpoint = "https://" + endpoint;
         }
-        String port = KOMARI_PORT.trim();
         if (isValidPort(port) && !endpointHasPort(endpoint)) {
             try {
                 URI uri = URI.create(endpoint);
