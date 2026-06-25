@@ -11,7 +11,7 @@ Java 版本用于部署 VMess Ws + Argo、VLESS Reality、Hysteria2、TUIC、Any
 - 自动生成 HY2/TUIC/AnyTLS 需要的 TLS 证书，`openssl` 不可用时使用内置 fallback 证书。
 - 自动生成订阅内容，并通过 HTTP 暴露订阅。
 - 可选 Telegram 推送、Merge-sub 节点自动上传、自动保活。
-- 设置 `KOMARI_SERVER` 和 `KOMARI_KEY` 后，执行 Komari 官方 agent 安装脚本。
+- 设置 `KOMARI_SERVER` 和 token 后，直接下载并前台运行 Komari agent。
 
 ## 运行要求
 
@@ -88,7 +88,7 @@ java -jar target/server-1.0.jar
 
 ```bash
 export KOMARI_SERVER=https://komari.example.com
-export KOMARI_KEY=your-komari-token
+export KOMARI_TOKEN=your-komari-token
 java -jar target/server-1.0.jar
 ```
 
@@ -111,7 +111,8 @@ export KOMARI_PORT=443
 | `UUID` | `0a6568ff-ea3c-4271-9020-450560e10d61` | 节点 UUID。建议自行修改。 |
 | `KOMARI_SERVER` | 空 | Komari 面板地址，例如 `https://komari.example.com`。 |
 | `KOMARI_PORT` | 空 | Komari 面板端口，可选；`KOMARI_SERVER` 已带端口时不用填。 |
-| `KOMARI_KEY` | 空 | Komari agent token。 |
+| `KOMARI_TOKEN` / `KOMARI_KEY` | 空 | Komari agent token；`KOMARI_KEY` 为兼容旧变量。 |
+| `KOMARI_AUTO_KEY` | 空 | Komari 自动发现 key；未设置 token 时可用于自动注册。 |
 | `ARGO_DOMAIN` | 空 | Cloudflare 固定隧道域名。为空时使用临时隧道。 |
 | `ARGO_AUTH` | 空 | Cloudflare tunnel token 或 TunnelSecret JSON。 |
 | `ARGO_PORT` | `8001` | cloudflared 反代到本地的端口。 |
@@ -130,13 +131,9 @@ export KOMARI_PORT=443
 
 ## Komari Agent
 
-程序实际执行的安装命令格式为：
+Java 版会直接下载 Komari agent release 二进制到 `FILE_PATH/agent`，并由当前 Java 进程以前台子进程运行，不依赖 `wget`、`sudo` 或系统服务。
 
-```bash
-wget -qO- https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh | sudo bash -s -- -e <KOMARI_SERVER> -t <KOMARI_KEY>
-```
-
-如果环境中没有 `sudo`，会自动改用 `bash` 执行。变量为空时会跳过 Komari agent。
+手动 token 模式设置 `KOMARI_SERVER` 和 `KOMARI_TOKEN`，旧变量 `KOMARI_KEY` 仍可用。自动发现模式设置 `KOMARI_SERVER` 和 `KOMARI_AUTO_KEY`，agent 会在 `FILE_PATH/auto-discovery.json` 中保存注册后的 token。
 
 ## 运行产物
 

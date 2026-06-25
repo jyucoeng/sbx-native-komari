@@ -23,7 +23,8 @@
 | `UUID` | 固定 UUID | 节点 UUID。建议自行修改。 |
 | `KOMARI_SERVER` | 空 | Komari 面板地址，例如 `https://komari.example.com`。 |
 | `KOMARI_PORT` | 空 | Komari 面板端口，可选；`KOMARI_SERVER` 已带端口时不用填。 |
-| `KOMARI_KEY` | 空 | Komari agent token。 |
+| `KOMARI_KEY` | 空 | Komari agent token。Java 版也支持 `KOMARI_TOKEN`。 |
+| `KOMARI_AUTO_KEY` | 空 | Java 版支持的 Komari 自动发现 key；未设置 token 时可用于自动注册。 |
 | `ARGO_DOMAIN` | 空 | Cloudflare 固定隧道域名。为空时使用临时隧道。 |
 | `ARGO_AUTH` | 空 | Cloudflare tunnel token 或 TunnelSecret JSON。 |
 | `ARGO_PORT` | `8001` | cloudflared 反代到本地的端口。 |
@@ -42,13 +43,9 @@
 
 ## Komari Agent
 
-设置 `KOMARI_SERVER` 和 `KOMARI_KEY` 后，程序会执行 Komari 官方安装脚本：
+Java 版会直接下载 Komari agent release 二进制到 `FILE_PATH/agent`，并由当前 Java 进程以前台子进程运行，不依赖 `wget`、`sudo` 或系统服务。
 
-```bash
-wget -qO- https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh | sudo bash -s -- -e <KOMARI_SERVER> -t <KOMARI_KEY>
-```
-
-如果环境中没有 `sudo`，会自动改用 `bash` 执行。`KOMARI_PORT` 仅在 `KOMARI_SERVER` 没有显式端口时追加。
+Java 版设置 `KOMARI_SERVER` 和 `KOMARI_TOKEN` 即可接入，也兼容旧变量 `KOMARI_KEY`。如果使用自动发现，则设置 `KOMARI_SERVER` 和 `KOMARI_AUTO_KEY`。`KOMARI_PORT` 仅在 `KOMARI_SERVER` 没有显式端口时追加。
 
 ## 目录结构
 
