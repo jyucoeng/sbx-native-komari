@@ -40,7 +40,8 @@ SUB_PATH = os.environ.get('SUB_PATH', 'sub')       # 获取订阅节点的token
 UUID = os.environ.get('UUID', '0a6568ff-ea3c-4271-9020-450560e10d63') # 节点 UUID，默认固定值，建议自行生成一个唯一的 UUID
 KOMARI_SERVER = os.environ.get('KOMARI_SERVER', '') # Komari 面板地址，例如 https://komari.example.com
 KOMARI_PORT = os.environ.get('KOMARI_PORT', '')     # Komari 面板端口，可选；KOMARI_SERVER 已带端口时不用填
-KOMARI_KEY = os.environ.get('KOMARI_KEY', '')       # Komari agent token
+KOMARI_KEY = os.environ.get('KOMARI_KEY') or os.environ.get('KOMARI_TOKEN', '') # Komari agent token
+KOMARI_AUTO_KEY = os.environ.get('KOMARI_AUTO_KEY', '') # Komari 自动发现 key，可选
 ARGO_PORT = int(os.environ.get('ARGO_PORT', '8001')) # 隧道端口,使用固定隧道token时需要在cloudflare里设置和这里一致
 ARGO_DOMAIN = os.environ.get('ARGO_DOMAIN', '')  # 固定隧道域名，留空将使用临时隧道
 ARGO_AUTH = os.environ.get('ARGO_AUTH', '')      # 固定密钥token或json，留空将使用临时隧道
@@ -66,6 +67,8 @@ bootLogPath = os.path.join(runtimeFilePath, 'boot.log')
 subPath = os.path.join(runtimeFilePath, 'sub.txt')
 listPath = os.path.join(runtimeFilePath, 'list.txt')
 keypairPath = os.path.join(runtimeFilePath, 'keypair.properties')
+komariConfigPath = os.path.join(runtimeFilePath, 'auto-discovery.json')
+komariAgentPath = os.path.join(runtimeFilePath, 'agent')
 subscribePath = '/' + SUB_PATH.lstrip('/')
 
 privateKey = ''
@@ -125,6 +128,8 @@ def cleanup_files(keep_sub=False):
     keep_files = set(['keypair.properties'])
     if keep_sub:
         keep_files.add('sub.txt')
+    keep_files.add('agent')
+    keep_files.add('auto-discovery.json')
 
     if os.path.exists(runtimeFilePath):
         try:
@@ -271,7 +276,7 @@ def singbox_payload():
 
 # ======================== Komari Agent ========================
 
-KOMARI_INSTALL_URL = 'https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh'
+KOMARI_AGENT_URL_BASE = 'https://github.com/komari-monitor/komari-agent/releases/latest/download/'
 
 def endpoint_has_port(endpoint: str) -> bool:
     try:
@@ -301,12 +306,51 @@ def komari_endpoint() -> str:
             endpoint = f"{endpoint.rstrip('/')}:{port}"
     return endpoint.rstrip('/')
 
-def komari_agent_command() -> str:
-    endpoint = komari_endpoint()
-    return '; '.join([
-        'if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=; fi',
-        f'wget -qO- {shlex.quote(KOMARI_INSTALL_URL)} | $SUDO bash -s -- -e {shlex.quote(endpoint)} -t {shlex.quote(KOMARI_KEY.strip())}'
-    ])
+def download_komari_agent() -> str:
+    if os.path.exists(komariAgentPath) and os.path.getsize(komariAgentPath) > 0:
+        print(f'Using cached komari-agent: {komariAgentPath}')
+        os.chmod(komariAgentPath, 0o755)
+        return komariAgentPath
+    try:
+        os.unlink(komariAgentPath)
+    except FileNotFoundError:
+        pass
+    os.makedirs(runtimeFilePath, exist_ok=True)
+    filename = 'komari-agent-linux-arm64' if ARCH == 'arm64' else 'komari-agent-linux-amd64'
+    url = f'{KOMARI_AGENT_URL_BASE}{filename}'
+    tmp = os.path.join(runtimeFilePath, 'agent.download')
+    print(f'Downloading komari-agent {ARCH}: {url}')
+    with requests.get(url, stream=True, timeout=180) as response:
+        response.raise_for_status()
+        with open(tmp, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+    os.replace(tmp, komariAgentPath)
+    os.chmod(komariAgentPath, 0o755)
+    return komariAgentPath
+
+def read_komari_file_token() -> str:
+    if not os.path.exists(komariConfigPath):
+        return ''
+    try:
+        with open(komariConfigPath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return str(data.get('token') or '').strip()
+    except Exception as e:
+        print(f'Failed to read Komari auto-discovery config: {e}')
+        return ''
+
+def komari_agent_command(agent_path: str) -> str:
+    endpoint = shlex.quote(komari_endpoint())
+    agent = shlex.quote(os.path.abspath(agent_path))
+    effective_token = read_komari_file_token() or KOMARI_KEY.strip()
+    if effective_token:
+        return f'{agent} -e {endpoint} -t {shlex.quote(effective_token)}'
+    auto_key = KOMARI_AUTO_KEY.strip()
+    if auto_key:
+        return f'{agent} -e {endpoint} --auto-discovery {shlex.quote(auto_key)}'
+    raise RuntimeError('Neither KOMARI_KEY/KOMARI_TOKEN nor auto-discovery.json token nor KOMARI_AUTO_KEY is set')
 
 class CommandService:
     def __init__(self, name: str, command: str):
@@ -316,6 +360,13 @@ class CommandService:
 
     def start(self):
         self.process = subprocess.Popen(['sh', '-c', self.command])
+        time.sleep(1)
+        if self.process.poll() is not None:
+            print(f'{self.name} command exited immediately with code {self.process.returncode}')
+            self.process = None
+
+    def is_running(self):
+        return self.process is not None and self.process.poll() is None
 
     def stop(self):
         if not self.process or self.process.poll() is not None:
@@ -1046,7 +1097,8 @@ def start_server():
     if not DISABLE_ARGO:
         cloudflared_lib = download_library(f'{base_url}/bot.so', 'bot.so')
 
-    if not KOMARI_SERVER or not KOMARI_KEY:
+    komari_enabled = bool(KOMARI_SERVER and (KOMARI_KEY or KOMARI_AUTO_KEY))
+    if not komari_enabled:
         print('KOMARI variable is empty, skipping komari-agent')
 
     # 5. 生成 Reality 密钥对
@@ -1090,8 +1142,9 @@ def start_server():
 
     # komari-agent服务
     komari_service = None
-    if KOMARI_SERVER and KOMARI_KEY:
-        komari_service = CommandService('komari-agent', komari_agent_command())
+    if komari_enabled:
+        agent = download_komari_agent()
+        komari_service = CommandService('komari-agent', komari_agent_command(agent))
         services.append(komari_service)
 
     # 信号处理
@@ -1116,7 +1169,7 @@ def start_server():
     if cloudflared_service:
         print('bot is running')
 
-    if komari_service:
+    if komari_service and komari_service.is_running():
         print('komari-agent is running')
 
     # 9. 等待并检测隧道域名

@@ -1,6 +1,6 @@
 # Sbx Native
 
-本仓库提供不同运行环境的 sing-box native 启动器，用于部署 VMess Ws + Argo、VLESS Reality、Hysteria2、TUIC、AnyTLS、SOCKS5 等代理；Komari agent 可选按官方安装脚本接入。
+本仓库提供不同运行环境的 sing-box native 启动器，用于部署 VMess Ws + Argo、VLESS Reality、Hysteria2、TUIC、AnyTLS、SOCKS5 等代理；Komari agent 可选直接下载二进制并由当前进程托管运行。
 
 请选择对应环境查看说明：
 
@@ -23,8 +23,8 @@
 | `UUID` | 固定 UUID | 节点 UUID。建议自行修改。 |
 | `KOMARI_SERVER` | 空 | Komari 面板地址，例如 `https://komari.example.com`。 |
 | `KOMARI_PORT` | 空 | Komari 面板端口，可选；`KOMARI_SERVER` 已带端口时不用填。 |
-| `KOMARI_KEY` | 空 | Komari agent token。Java 版也支持 `KOMARI_TOKEN`。 |
-| `KOMARI_AUTO_KEY` | 空 | Java 版支持的 Komari 自动发现 key；未设置 token 时可用于自动注册。 |
+| `KOMARI_KEY` / `KOMARI_TOKEN` | 空 | Komari agent token；`KOMARI_KEY` 为兼容旧变量。 |
+| `KOMARI_AUTO_KEY` | 空 | Komari 自动发现 key；未设置 token 时可用于自动注册。 |
 | `ARGO_DOMAIN` | 空 | Cloudflare 固定隧道域名。为空时使用临时隧道。 |
 | `ARGO_AUTH` | 空 | Cloudflare tunnel token 或 TunnelSecret JSON。 |
 | `ARGO_PORT` | `8001` | cloudflared 反代到本地的端口。 |
@@ -43,9 +43,9 @@
 
 ## Komari Agent
 
-Java 版会直接下载 Komari agent release 二进制到 `FILE_PATH/agent`，并由当前 Java 进程以前台子进程运行，不依赖 `wget`、`sudo` 或系统服务。
+各版本会直接下载 Komari agent release 二进制到运行目录，并由当前进程以前台子进程运行，不依赖 `wget`、`sudo` 或系统服务。
 
-Java 版设置 `KOMARI_SERVER` 和 `KOMARI_TOKEN` 即可接入，也兼容旧变量 `KOMARI_KEY`。如果使用自动发现，则设置 `KOMARI_SERVER` 和 `KOMARI_AUTO_KEY`。`KOMARI_PORT` 仅在 `KOMARI_SERVER` 没有显式端口时追加。
+设置 `KOMARI_SERVER` 和 `KOMARI_KEY`/`KOMARI_TOKEN` 即可接入。如果使用自动发现，则设置 `KOMARI_SERVER` 和 `KOMARI_AUTO_KEY`。`KOMARI_PORT` 仅在 `KOMARI_SERVER` 没有显式端口时追加。
 
 ## 目录结构
 
