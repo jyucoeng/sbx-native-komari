@@ -50,8 +50,9 @@ public class App {
     private static final String FILE_PATH = env("FILE_PATH", "world");
     private static final String SUB_PATH = env("SUB_PATH", "sub");
     private static final String UUID = env("UUID", "938d63b2-816b-4042-bf9f-50618bde333a");
-    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "komari.xxxx.nyc.mn:443");
-    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "");
+    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "");
+    private static final String KOMARI_PORT = env("KOMARI_PORT", "");
+    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", env("KOMARI_KEY", ""));
     private static final String KOMARI_AUTO_KEY = env("KOMARI_AUTO_KEY", "");
     private static final String KOMARI_AGENT_URL_BASE =
             "https://github.com/komari-monitor/komari-agent/releases/latest/download/";
@@ -85,7 +86,6 @@ public class App {
     private static final Path KEYPAIR_PATH = RUNTIME_DIR.resolve("keypair.properties");
     private static final String SUBSCRIBE_PATH = "/" + SUB_PATH.replaceFirst("^/+", "");
     private static final String ARCH = detectArch();
-    private static final String KOMARI_INSTALL_URL = "https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh";
 
     private static String privateKey = "";
     private static String publicKey = "";
@@ -111,7 +111,7 @@ public class App {
                 !KOMARI_SERVER.isEmpty() &&
                 (!KOMARI_TOKEN.isEmpty() || !KOMARI_AUTO_KEY.isEmpty());
         if (!komariEnabled) {
-            System.out.println("KOMARI disabled");
+            System.out.println("KOMARI variable is empty, skipping komari-agent");
         }
 
         if (isValidPort(REALITY_PORT)) {
@@ -127,6 +127,7 @@ public class App {
         Files.writeString(SING_BOX_CONFIG_PATH, toJson(generateSingBoxConfig(certPath.toString(), keyPath.toString())), StandardCharsets.UTF_8);
 
         List<Service> services = new ArrayList<>();
+        CommandService komariService = null;
         services.add(new NativeService("sing-box", singBoxLib, "StartSingBox", "StopSingBox", singboxPayload()));
         if (cloudflaredLib != null) {
             String payload = cloudflaredPayload();
@@ -135,16 +136,10 @@ public class App {
             }
         }
         if (komariEnabled) {
-
             Path agent = downloadKomariAgent();
-
-            services.add(
-                    new CommandService(
-                            "komari-agent",
-                            komariAgentCommand(agent)
-                    )
-        );
-    }
+            komariService = new CommandService("komari-agent", komariAgentCommand(agent));
+            services.add(komariService);
+        }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> stopAll(services), "shutdown-hook"));
         for (Service service : services) {
@@ -154,7 +149,7 @@ public class App {
         sleep(1000);
         System.out.println("web is running");
         if (cloudflaredLib != null) System.out.println("bot is running");
-        if (komariEnabled) System.out.println("komari-agent is running");
+        if (komariService != null && komariService.isRunning()) System.out.println("komari-agent is running");
 
         sleep(5000);
         String argoDomain = extractDomain().orElse(null);
@@ -253,6 +248,16 @@ public class App {
 
         public void start() throws IOException {
             process = new ProcessBuilder("sh", "-c", command).inheritIO().start();
+            try {
+                if (process.waitFor(2, TimeUnit.SECONDS)) {
+                    System.out.println(name + " command exited immediately with code " + process.exitValue());
+                    process = null;
+                    return;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(name + " command start interrupted", e);
+            }
             Thread watcher = new Thread(() -> {
                 try {
                     int code = process.waitFor();
@@ -263,6 +268,10 @@ public class App {
             }, name + "-watcher");
             watcher.setDaemon(true);
             watcher.start();
+        }
+
+        boolean isRunning() {
+            return process != null && process.isAlive();
         }
 
         public void stop() throws InterruptedException {
@@ -323,12 +332,13 @@ public class App {
     }
     private static Path downloadKomariAgent() throws Exception {
 
-        if (Files.exists(KOMARI_AGENT_PATH)) {
+        if (Files.exists(KOMARI_AGENT_PATH) && Files.size(KOMARI_AGENT_PATH) > 0) {
             System.out.println("Using cached komari-agent: " + KOMARI_AGENT_PATH);
 
             KOMARI_AGENT_PATH.toFile().setExecutable(true, false);
             return KOMARI_AGENT_PATH;
         }
+        Files.deleteIfExists(KOMARI_AGENT_PATH);
 
         String fileName;
 
@@ -356,7 +366,9 @@ public class App {
 
         Files.createDirectories(RUNTIME_DIR);
 
-        Files.write(KOMARI_AGENT_PATH, response.body());
+        Path tmp = RUNTIME_DIR.resolve("agent.download");
+        Files.write(tmp, response.body());
+        Files.move(tmp, KOMARI_AGENT_PATH, StandardCopyOption.REPLACE_EXISTING);
 
         KOMARI_AGENT_PATH.toFile().setExecutable(true, false);
 
@@ -499,10 +511,23 @@ public class App {
     private static String komariEndpoint() {
         String endpoint = KOMARI_SERVER.trim();
         if (endpoint.isEmpty()) return "";
-        if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
+        if (!Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE).matcher(endpoint).find()) {
             endpoint = "https://" + endpoint;
         }
-        
+        String port = KOMARI_PORT.trim();
+        if (isValidPort(port) && !endpointHasPort(endpoint)) {
+            try {
+                URI uri = URI.create(endpoint);
+                String host = uri.getHost();
+                if (host != null) {
+                    endpoint = new URI(uri.getScheme(), uri.getUserInfo(), host, Integer.parseInt(port), uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
+                } else {
+                    endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
+                }
+            } catch (Exception e) {
+                endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
+            }
+        }
         return endpoint.replaceAll("/+$", "");
     }
 
@@ -525,8 +550,6 @@ public class App {
 
         String endpoint = shellQuote(komariEndpoint());
         String agent = shellQuote(agentPath.toAbsolutePath().toString());
-
-        String token = KOMARI_TOKEN.trim();
         String autoKey = KOMARI_AUTO_KEY.trim();
         String fileToken = null;
 
@@ -557,6 +580,7 @@ public class App {
         throw new IllegalStateException(
                 "Neither KOMARI_TOKEN nor auto-discovery.json token nor KOMARI_AUTO_KEY is set");
         }
+
     private static void generateOrLoadKeypair() throws IOException {
         if (Files.exists(KEYPAIR_PATH)) {
             String content = Files.readString(KEYPAIR_PATH, StandardCharsets.UTF_8);
@@ -964,6 +988,7 @@ public class App {
                         String name = path.getFileName().toString();
                         if (name.equals("keypair.properties") 
                             || (keepSub && name.equals("sub.txt"))
+                            || name.equals("agent")
                             || name.equals("")
                             || name.equals("auto-discovery.json")
                          ) continue;

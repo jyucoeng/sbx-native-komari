@@ -21,7 +21,8 @@ const SUB_PATH       = process.env.SUB_PATH       || 'sub';      // 订阅sub路
 const UUID           = process.env.UUID           || '0a6568ff-ea3c-4271-9020-450560e10d63'; // 节点 UUID，建议自行修改
 const KOMARI_SERVER  = process.env.KOMARI_SERVER  || '';         // Komari 面板地址，例如 https://komari.example.com
 const KOMARI_PORT    = process.env.KOMARI_PORT    || '';         // Komari 面板端口，可选；KOMARI_SERVER 已带端口时不用填
-const KOMARI_KEY     = process.env.KOMARI_KEY     || '';         // Komari agent token
+const KOMARI_KEY     = process.env.KOMARI_KEY || process.env.KOMARI_TOKEN || ''; // Komari agent token
+const KOMARI_AUTO_KEY = process.env.KOMARI_AUTO_KEY || '';       // Komari 自动发现 key，可选
 const ARGO_DOMAIN    = process.env.ARGO_DOMAIN    || '';         // argo固定隧道域名,留空即使用临时隧道
 const ARGO_AUTH      = process.env.ARGO_AUTH      || '';         // argo固定隧道token或json,留空即使用临时隧道
 const ARGO_PORT      = Number(process.env.ARGO_PORT) || 8001;    // argo固定隧道端口
@@ -47,6 +48,8 @@ const bootLogPath = path.resolve(runtimeFilePath, 'boot.log');
 const subPath = path.resolve(runtimeFilePath, 'sub.txt');
 const listPath = path.resolve(runtimeFilePath, 'list.txt');
 const keypairPath = path.resolve(runtimeFilePath, 'keypair.properties');
+const komariConfigPath = path.resolve(runtimeFilePath, 'auto-discovery.json');
+const komariAgentPath = path.resolve(runtimeFilePath, 'agent');
 const subscribePath = '/' + SUB_PATH.replace(/^\//, '');
 const httpPort = PORT;
 
@@ -91,6 +94,8 @@ function cleanupOldFiles() {
 function cleanupFiles(options = {}) {
   const keepFiles = new Set(['keypair.properties']);
   if (options.keepSub) keepFiles.add('sub.txt');
+  keepFiles.add('agent');
+  keepFiles.add('auto-discovery.json');
   if (fs.existsSync(runtimeFilePath)) {
     try {
       const files = fs.readdirSync(runtimeFilePath);
@@ -561,7 +566,7 @@ function generateSingBoxConfig(certPath, keyPath) {
 
 // ======================== Komari Agent ========================
 
-const KOMARI_INSTALL_URL = 'https://raw.githubusercontent.com/komari-monitor/komari-agent/refs/heads/main/install.sh';
+const KOMARI_AGENT_URL_BASE = 'https://github.com/komari-monitor/komari-agent/releases/latest/download/';
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'"'"'`)}'`;
@@ -591,26 +596,69 @@ function komariEndpoint() {
   return endpoint.replace(/\/+$/, '');
 }
 
-function komariAgentCommand() {
-  const endpoint = komariEndpoint();
-  return [
-    'if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=; fi',
-    `wget -qO- ${shellQuote(KOMARI_INSTALL_URL)} | $SUDO bash -s -- -e ${shellQuote(endpoint)} -t ${shellQuote(String(KOMARI_KEY).trim())}`
-  ].join('; ');
+async function downloadKomariAgent() {
+  if (fs.existsSync(komariAgentPath) && fs.statSync(komariAgentPath).size > 0) {
+    console.log(`Using cached komari-agent: ${komariAgentPath}`);
+    fs.chmodSync(komariAgentPath, 0o755);
+    return komariAgentPath;
+  }
+  try { fs.unlinkSync(komariAgentPath); } catch (e) { }
+  await fs.promises.mkdir(runtimeFilePath, { recursive: true });
+  const fileName = arch === 'arm64' ? 'komari-agent-linux-arm64' : 'komari-agent-linux-amd64';
+  const url = `${KOMARI_AGENT_URL_BASE}${fileName}`;
+  const tmp = path.resolve(runtimeFilePath, 'agent.download');
+  console.log(`Downloading komari-agent ${arch}: ${url}`);
+  const writer = fs.createWriteStream(tmp);
+  const response = await axios.get(url, { responseType: 'stream', timeout: 3 * 60 * 1000 });
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Download komari-agent failed: HTTP ${response.status}`);
+  }
+  response.data.on('error', error => writer.destroy(error));
+  response.data.pipe(writer);
+  await new Promise((resolve, reject) => writer.on('finish', resolve).on('error', reject));
+  fs.renameSync(tmp, komariAgentPath);
+  fs.chmodSync(komariAgentPath, 0o755);
+  return komariAgentPath;
+}
+
+function readKomariFileToken() {
+  if (!fs.existsSync(komariConfigPath)) return '';
+  try {
+    const content = fs.readFileSync(komariConfigPath, 'utf8');
+    const parsed = JSON.parse(content);
+    return String(parsed.token || '').trim();
+  } catch (error) {
+    console.warn(`Failed to read Komari auto-discovery config: ${error.message}`);
+    return '';
+  }
+}
+
+function komariAgentCommand(agentPath) {
+  const endpoint = shellQuote(komariEndpoint());
+  const agent = shellQuote(path.resolve(agentPath));
+  const effectiveToken = readKomariFileToken() || String(KOMARI_KEY || '').trim();
+  if (effectiveToken) return `${agent} -e ${endpoint} -t ${shellQuote(effectiveToken)}`;
+  const autoKey = String(KOMARI_AUTO_KEY || '').trim();
+  if (autoKey) return `${agent} -e ${endpoint} --auto-discovery ${shellQuote(autoKey)}`;
+  throw new Error('Neither KOMARI_KEY/KOMARI_TOKEN nor auto-discovery.json token nor KOMARI_AUTO_KEY is set');
 }
 
 function createCommandService(name, command) {
   let child = null;
+  let running = false;
   return {
     name,
     start: () => {
       child = spawn('sh', ['-c', command], { stdio: 'inherit' });
+      running = true;
       child.on('error', error => console.error(`${name} command failed: ${error.message}`));
       child.on('exit', (code, signal) => {
+        running = false;
         if (code && code !== 0) console.warn(`${name} command exited with code ${code}`);
         else if (signal) console.warn(`${name} command exited by signal ${signal}`);
       });
     },
+    isRunning: () => !!child && child.exitCode === null && !child.killed && running,
     stop: () => new Promise(resolve => {
       if (!child || child.exitCode !== null || child.killed) return resolve(0);
       child.once('exit', () => resolve(0));
@@ -920,7 +968,8 @@ async function startServer() {
   if (DISABLE_ARGO !== 'true' && DISABLE_ARGO !== true) {
     cloudflaredLib = await downloadLibrary(`${baseUrl}/bot.so`, 'bot.so');
   }
-  if (!KOMARI_SERVER || !KOMARI_KEY) {
+  const komariEnabled = !!(KOMARI_SERVER && (KOMARI_KEY || KOMARI_AUTO_KEY));
+  if (!komariEnabled) {
     console.log('KOMARI variable is empty, skipping komari-agent');
   }
 
@@ -960,8 +1009,9 @@ async function startServer() {
 
   // komari-agent
   let komariService = null;
-  if (KOMARI_SERVER && KOMARI_KEY) {
-    komariService = createCommandService('komari-agent', komariAgentCommand());
+  if (komariEnabled) {
+    const agent = await downloadKomariAgent();
+    komariService = createCommandService('komari-agent', komariAgentCommand(agent));
     services.push(komariService);
   }
 
@@ -979,7 +1029,7 @@ async function startServer() {
   await new Promise(r => setTimeout(r, 1000));
   console.log('web is running');
   if (cloudflaredService) console.log('bot is running');
-  if (komariService) console.log('komari-agent is running');
+  if (komariService && komariService.isRunning()) console.log('komari-agent is running');
 
   // 9. 等待并检测隧道域名
   await new Promise(r => setTimeout(r, 5000));
