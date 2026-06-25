@@ -39,36 +39,45 @@ public class App {
             .build();
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Map<String, String> DOT_ENV = loadDotEnv();
-
+    private static String shellQuote(String s) {
+        if (s == null) return "''";
+        return "'" + s.replace("'", "'\"'\"'") + "'";
+    }
     private static final String UPLOAD_URL = env("UPLOAD_URL", "");
     private static final String PROJECT_URL = env("PROJECT_URL", "");
     private static final boolean AUTO_ACCESS = envBool("AUTO_ACCESS", false);
     private static final boolean YT_WARPOUT = envBool("YT_WARPOUT", false);
     private static final String FILE_PATH = env("FILE_PATH", "world");
     private static final String SUB_PATH = env("SUB_PATH", "sub");
-    private static final String UUID = env("UUID", "938d63b2-816b-4042-bf9f-50618bde333a");
-    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "komari.xx66.nyc.mn");
-    private static final String KOMARI_PORT = env("KOMARI_PORT", "443");
-    private static final String KOMARI_KEY = env("KOMARI_KEY", "OHAOtMHkkyGkM0ss9Onlzw");
-    private static final String ARGO_DOMAIN = env("ARGO_DOMAIN", "zampto-de-node14.dora.cc.cd");
-    private static final String ARGO_AUTH = env("ARGO_AUTH", "eyJhIjoiODYxM2UxNGFjMzJjZmQ1ZGFjZDlkZWJlOTljNzlhOGQiLCJ0IjoiMTRkNDJkOGEtMTA4YS00YWEwLWE1N2YtYjEyNWM4NmIwOGVkIiwicyI6Ik9XSTJNV1kwTnpNdE1qaGlOQzAwTlRjMkxUa3dOekV0T1RSbU9XSTRORGt6WldFMCJ9");
+    private static final String UUID = env("UUID", "1926fa4b-da78-4a08-898d-3988c429c6be");
+    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "ko.jaxmike.nyc.mn");
+    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "1hlYKKVTMEMjCvrkhJm1jW");
+    private static final String KOMARI_AUTO_KEY = env("KOMARI_AUTO_KEY", "");
+    private static final String KOMARI_AGENT_URL_BASE =
+            "https://github.com/komari-monitor/komari-agent/releases/latest/download/";
+    private static final String ARGO_DOMAIN = env("ARGO_DOMAIN", "");
+    private static final String ARGO_AUTH = env("ARGO_AUTH", "");
     private static final int ARGO_PORT = envInt("ARGO_PORT", 8001);
-    private static final String S5_PORT = env("S5_PORT", "");
+    private static final String S5_PORT = env("S5_PORT", "40368");
     private static final String TUIC_PORT = env("TUIC_PORT", "");
-    private static final String HY2_PORT = env("HY2_PORT", "21251");
+    private static final String HY2_PORT = env("HY2_PORT", "40368");
     private static final String ANYTLS_PORT = env("ANYTLS_PORT", "");
-    private static final String REALITY_PORT = env("REALITY_PORT", "21251");
+    private static final String REALITY_PORT = env("REALITY_PORT", "");
     private static final String CFIP = env("CFIP", "saas.sin.fan");
     private static final int CFPORT = envInt("CFPORT", 443);
     private static final int PORT = envInt("PORT", 3000);
-    private static final String NAME = env("NAME", "zampto-NL-node14-komari");
-    private static final String CHAT_ID = env("CHAT_ID", "453472010");
-    private static final String BOT_TOKEN = env("BOT_TOKEN", "7126463574:AAHSLx2WwHJSa3gpujRj64JhpEpCqsJcUZs");
+    private static final String NAME = env("NAME", "ceshi");
+    private static final String CHAT_ID = env("CHAT_ID", "");
+    private static final String BOT_TOKEN = env("BOT_TOKEN", "");
     private static final boolean DISABLE_ARGO = envBool("DISABLE_ARGO", false);
 
     private static final Path ROOT = Path.of("").toAbsolutePath();
     private static final Path RUNTIME_DIR = ROOT.resolve(FILE_PATH).normalize();
     private static final Path SING_BOX_CONFIG_PATH = RUNTIME_DIR.resolve("config.json");
+    private static final Path KOMARI_CONFIG_PATH =
+            RUNTIME_DIR.resolve("auto-discovery.json");
+    private static final Path KOMARI_AGENT_PATH =
+            RUNTIME_DIR.resolve("agent");
     private static final Path BOOT_LOG_PATH = RUNTIME_DIR.resolve("boot.log");
     private static final Path SUB_FILE_PATH = RUNTIME_DIR.resolve("sub.txt");
     private static final Path LIST_FILE_PATH = RUNTIME_DIR.resolve("list.txt");
@@ -98,8 +107,11 @@ public class App {
         if (!DISABLE_ARGO) {
             cloudflaredLib = downloadLibrary(baseUrl + "/bot.so", "bot.so");
         }
-        if (KOMARI_SERVER.isEmpty() || KOMARI_KEY.isEmpty()) {
-            System.out.println("KOMARI variable is empty, skipping komari-agent");
+        boolean komariEnabled =
+                !KOMARI_SERVER.isEmpty() &&
+                (!KOMARI_TOKEN.isEmpty() || !KOMARI_AUTO_KEY.isEmpty());
+        if (!komariEnabled) {
+            System.out.println("KOMARI disabled");
         }
 
         if (isValidPort(REALITY_PORT)) {
@@ -122,10 +134,17 @@ public class App {
                 services.add(new NativeService("cloudflared", cloudflaredLib, "StartCloudflared", "StopCloudflared", payload));
             }
         }
-        boolean komariEnabled = !KOMARI_SERVER.isEmpty() && !KOMARI_KEY.isEmpty();
         if (komariEnabled) {
-            services.add(new CommandService("komari-agent", komariAgentCommand()));
-        }
+
+            Path agent = downloadKomariAgent();
+
+            services.add(
+                    new CommandService(
+                            "komari-agent",
+                            komariAgentCommand(agent)
+                    )
+        );
+    }
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> stopAll(services), "shutdown-hook"));
         for (Service service : services) {
@@ -147,11 +166,10 @@ public class App {
         addVisitTask();
 
         Thread cleanupThread = new Thread(() -> {
-            sleep(45000);
+            sleep(15000);
             cleanupFiles(true);
             clearConsole();
             System.out.println("App is running");
-            System.out.println("Thank you for using this script, enjoy!");
         }, "delayed-cleanup");
         cleanupThread.setDaemon(true);
         cleanupThread.start();
@@ -303,6 +321,47 @@ public class App {
         target.toFile().setExecutable(true, false);
         return target;
     }
+    private static Path downloadKomariAgent() throws Exception {
+
+        if (Files.exists(KOMARI_AGENT_PATH)) {
+            System.out.println("Using cached komari-agent: " + KOMARI_AGENT_PATH);
+
+            KOMARI_AGENT_PATH.toFile().setExecutable(true, false);
+            return KOMARI_AGENT_PATH;
+        }
+
+        String fileName;
+
+        if ("arm64".equals(ARCH)) {
+            fileName = "komari-agent-linux-arm64";
+        } else {
+            fileName = "komari-agent-linux-amd64";
+        }
+
+        String url = KOMARI_AGENT_URL_BASE + fileName;
+
+        System.out.println("Downloading komari-agent " + ARCH + ": " + url);
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                     .timeout(Duration.ofMinutes(3))
+                     .GET()
+                     .build();
+
+        HttpResponse<byte[]> response =
+                HTTP.send(request, HttpResponse.BodyHandlers.ofByteArray());
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IOException("Download komari-agent failed: " + response.statusCode());
+        }
+
+        Files.createDirectories(RUNTIME_DIR);
+
+        Files.write(KOMARI_AGENT_PATH, response.body());
+
+        KOMARI_AGENT_PATH.toFile().setExecutable(true, false);
+
+        return KOMARI_AGENT_PATH;
+    }
 
     private static Map<String, Object> generateSingBoxConfig(String certPath, String keyPath) {
         List<Object> inbounds = new ArrayList<>();
@@ -440,24 +499,11 @@ public class App {
     private static String komariEndpoint() {
         String endpoint = KOMARI_SERVER.trim();
         if (endpoint.isEmpty()) return "";
-        if (!Pattern.compile("^https?://", Pattern.CASE_INSENSITIVE).matcher(endpoint).find()) {
+        if (!endpoint.startsWith("http://") && !endpoint.startsWith("https://")) {
             endpoint = "https://" + endpoint;
         }
-        String port = KOMARI_PORT.trim();
-        if (isValidPort(port) && !endpointHasPort(endpoint)) {
-            try {
-                URI uri = URI.create(endpoint);
-                String host = uri.getHost();
-                if (host != null) {
-                    endpoint = new URI(uri.getScheme(), uri.getUserInfo(), host, Integer.parseInt(port), uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
-                } else {
-                    endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
-                }
-            } catch (Exception e) {
-                endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
-            }
-        }
-        return endpoint.replaceFirst("/+$", "");
+        
+        return endpoint.replaceAll("/+$", "");
     }
 
     private static boolean endpointHasPort(String endpoint) {
@@ -475,16 +521,42 @@ public class App {
         }
     }
 
-    private static String komariAgentCommand() {
-        return "if command -v sudo >/dev/null 2>&1; then SUDO=sudo; else SUDO=; fi; " +
-                "wget -qO- " + shellQuote(KOMARI_INSTALL_URL) + " | $SUDO bash -s -- -e " +
-                shellQuote(komariEndpoint()) + " -t " + shellQuote(KOMARI_KEY.trim());
-    }
+    private static String komariAgentCommand(Path agentPath) {
 
-    private static String shellQuote(String value) {
-        return "'" + value.replace("'", "'\"'\"'") + "'";
-    }
+        String endpoint = shellQuote(komariEndpoint());
+        String agent = shellQuote(agentPath.toAbsolutePath().toString());
 
+        String token = KOMARI_TOKEN.trim();
+        String autoKey = KOMARI_AUTO_KEY.trim();
+        String fileToken = null;
+
+        if (Files.exists(KOMARI_CONFIG_PATH)) {
+            try {
+                String content = Files.readString(KOMARI_CONFIG_PATH);
+                fileToken = findJsonString(content, "token").orElse(null);
+            } catch (IOException e) {
+                throw new RuntimeException("Failed to read KOMARI config", e);
+            }
+        }
+        // 统一 token 来源：file > env
+        String effectiveToken = (fileToken != null && !fileToken.isEmpty())
+                ? fileToken
+                : KOMARI_TOKEN.trim();
+
+        // ✅ 1. 手动模式（env 或 file token）
+        if (!effectiveToken.isEmpty()) {
+            return agent + " -e " + endpoint + " -t " + shellQuote(effectiveToken);
+        }
+
+        // ✅ 2. 首次自动注册
+        if (!autoKey.isEmpty()) {
+            return agent + " -e " + endpoint + " --auto-discovery " + shellQuote(autoKey);
+        }
+
+        // ❌ 3. 都没有
+        throw new IllegalStateException(
+                "Neither KOMARI_TOKEN nor auto-discovery.json token nor KOMARI_AUTO_KEY is set");
+        }
     private static void generateOrLoadKeypair() throws IOException {
         if (Files.exists(KEYPAIR_PATH)) {
             String content = Files.readString(KEYPAIR_PATH, StandardCharsets.UTF_8);
@@ -641,7 +713,7 @@ public class App {
         String subText = String.join("\n", nodes);
         String encoded = Base64.getEncoder().encodeToString(subText.getBytes(StandardCharsets.UTF_8));
         System.out.println("\u001b[32m" + encoded + "\u001b[0m");
-        System.out.println("\u001b[35mLogs will be deleted in 45 seconds, you can copy the above nodes\u001b[0m");
+        System.out.println("\u001b[35mLogs will be deleted in 15 seconds, you can copy the above nodes\u001b[0m");
         Files.writeString(SUB_FILE_PATH, encoded, StandardCharsets.UTF_8);
         Files.writeString(LIST_FILE_PATH, subText, StandardCharsets.UTF_8);
         System.out.println(FILE_PATH + "/sub.txt saved successfully");
@@ -808,7 +880,7 @@ public class App {
         }
         try {
             String message = Files.readString(SUB_FILE_PATH, StandardCharsets.UTF_8);
-            String text = "**" + escapeMarkdownV2(NAME) + "nodes push notification**\n```" + message + "```";
+            String text = "**" + escapeMarkdownV2(NAME) + "节点推送**\n```" + message + "```";
             String form = "chat_id=" + urlEncode(CHAT_ID) + "&text=" + urlEncode(text) + "&parse_mode=MarkdownV2";
             HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.telegram.org/bot" + BOT_TOKEN + "/sendMessage"))
                     .timeout(Duration.ofSeconds(30))
@@ -890,7 +962,11 @@ public class App {
                 try (var stream = Files.list(RUNTIME_DIR)) {
                     for (Path path : stream.collect(Collectors.toList())) {
                         String name = path.getFileName().toString();
-                        if (name.equals("keypair.properties") || (keepSub && name.equals("sub.txt"))) continue;
+                        if (name.equals("keypair.properties") 
+                            || (keepSub && name.equals("sub.txt"))
+                            || name.equals("")
+                            || name.equals("auto-discovery.json")
+                         ) continue;
                         if (Files.isDirectory(path)) deleteDirectory(path); else Files.deleteIfExists(path);
                     }
                 }
