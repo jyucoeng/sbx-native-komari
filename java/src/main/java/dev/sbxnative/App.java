@@ -133,8 +133,16 @@ public class App {
         }
         boolean komariEnabled = !KOMARI_SERVER.isEmpty() && !KOMARI_KEY.isEmpty();
         if (komariEnabled) {
-            services.add(new CommandService("komari-agent", komariAgentCommand()));
-        }
+
+            Path agent = downloadKomariAgent();
+
+            services.add(
+                    new CommandService(
+                            "komari-agent",
+                            komariAgentCommand(agent)
+                    )
+        );
+}
 
         Runtime.getRuntime().addShutdownHook(new Thread(() -> stopAll(services), "shutdown-hook"));
         for (Service service : services) {
