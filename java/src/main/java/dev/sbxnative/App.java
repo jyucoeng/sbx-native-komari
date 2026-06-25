@@ -506,21 +506,6 @@ public class App {
         
         return endpoint.replaceAll("/+$", "");
     }
-        if (isValidPort(port) && !endpointHasPort(endpoint)) {
-            try {
-                URI uri = URI.create(endpoint);
-                String host = uri.getHost();
-                if (host != null) {
-                    endpoint = new URI(uri.getScheme(), uri.getUserInfo(), host, Integer.parseInt(port), uri.getPath(), uri.getQuery(), uri.getFragment()).toString();
-                } else {
-                    endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
-                }
-            } catch (Exception e) {
-                endpoint = endpoint.replaceFirst("/+$", "") + ":" + port;
-            }
-        }
-        return endpoint.replaceFirst("/+$", "");
-    }
 
     private static boolean endpointHasPort(String endpoint) {
         try {
