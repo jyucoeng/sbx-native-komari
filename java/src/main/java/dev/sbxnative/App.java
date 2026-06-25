@@ -528,39 +528,34 @@ public class App {
 
         String token = KOMARI_TOKEN.trim();
         String autoKey = KOMARI_AUTO_KEY.trim();
+        String fileToken = null;
 
-        // ✅ 1. 手动模式（最高优先级）
-        if (!token.isEmpty()) {
-            return agent + " -e " + endpoint + " -t " + shellQuote(token);
-        }
-
-        // 2. 已存在 auto-discovery.json → 读取 token
         if (Files.exists(KOMARI_CONFIG_PATH)) {
-            String content;
-
             try {
-                content = Files.readString(KOMARI_CONFIG_PATH);
+                String content = Files.readString(KOMARI_CONFIG_PATH);
+                fileToken = findJsonString(content, "token").orElse(null);
             } catch (IOException e) {
                 throw new RuntimeException("Failed to read KOMARI config", e);
             }
+        }
+        // 统一 token 来源：file > env
+        String effectiveToken = (fileToken != null && !fileToken.isEmpty())
+                ? fileToken
+                : KOMARI_TOKEN.trim();
 
-            Optional<String> fileToken = findJsonString(content, "token");
-
-            if (fileToken.isPresent() && !fileToken.get().isEmpty()) {
-                return agent + " -e " + endpoint + " -t " + shellQuote(fileToken.get());
-            }
-
-            return agent + " -e " + endpoint;
+        // ✅ 1. 手动模式（env 或 file token）
+        if (!effectiveToken.isEmpty()) {
+            return agent + " -e " + endpoint + " -t " + shellQuote(effectiveToken);
         }
 
-        // ✅ 3. 首次自动注册
+        // ✅ 2. 首次自动注册
         if (!autoKey.isEmpty()) {
             return agent + " -e " + endpoint + " --auto-discovery " + shellQuote(autoKey);
         }
 
+        // ❌ 3. 都没有
         throw new IllegalStateException(
-            "Neither KOMARI_TOKEN nor KOMARI_AUTO_KEY is set");
-    }
+                "Neither KOMARI_TOKEN nor auto-discovery.json token nor KOMARI_AUTO_KEY is set");
 
     private static void generateOrLoadKeypair() throws IOException {
         if (Files.exists(KEYPAIR_PATH)) {
