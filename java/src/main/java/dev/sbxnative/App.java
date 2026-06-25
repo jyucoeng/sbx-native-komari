@@ -534,8 +534,17 @@ public class App {
             return agent + " -e " + endpoint + " -t " + shellQuote(token);
         }
 
-        // ✅ 2. 已注册过（auto-discovery.json 存在）
+        // 2. 已存在 auto-discovery.json → 读取 token
         if (Files.exists(KOMARI_CONFIG_PATH)) {
+            String content = Files.readString(KOMARI_CONFIG_PATH);
+
+            Optional<String> fileToken = findJsonString(content, "token");
+
+            if (fileToken.isPresent() && !fileToken.get().isEmpty()) {
+                return agent + " -e " + endpoint + " -t " + shellQuote(fileToken.get());
+            }
+
+            // 没 token 才 fallback
             return agent + " -e " + endpoint;
         }
 
