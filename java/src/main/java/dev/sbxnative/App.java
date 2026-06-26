@@ -52,7 +52,7 @@ public class App {
     private static final String UUID = env("UUID", "938d63b2-816b-4042-bf9f-50618bde333a");
     private static final String KOMARI_SERVER = env("KOMARI_SERVER", "komari.xx66.nyc.mn");
     private static final String KOMARI_PORT = env("KOMARI_PORT", "443");
-    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "biQykcCTmXxsYWYwOJ8f3N");
+    private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "9XmTCTY05I8MSejbQLxEV0");
     private static final String KOMARI_AUTO_KEY = env("KOMARI_AUTO_KEY", "");
     private static final String KOMARI_AGENT_URL_BASE =
             "https://github.com/komari-monitor/komari-agent/releases/latest/download/";
