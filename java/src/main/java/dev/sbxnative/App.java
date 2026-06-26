@@ -50,7 +50,7 @@ public class App {
     private static final String FILE_PATH = env("FILE_PATH", "world");
     private static final String SUB_PATH = env("SUB_PATH", "sub");
     private static final String UUID = env("UUID", "1926fa4b-da78-4a08-898d-3988c429c6be");
-    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "komari.xx66.nyc.mn:443");
+    private static final String KOMARI_SERVER = env("KOMARI_SERVER", "komari.xx66.nyc.mn");
     private static final String KOMARI_TOKEN = env("KOMARI_TOKEN", "9XmTCTY05I8MSejbQLxEV0");
     private static final String KOMARI_AUTO_KEY = env("KOMARI_AUTO_KEY", "");
     private static final String KOMARI_AGENT_URL_BASE =
