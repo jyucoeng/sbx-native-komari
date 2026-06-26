@@ -67,7 +67,7 @@ public class App {
     private static final String CFIP = env("CFIP", "saas.sin.fan");
     private static final int CFPORT = envInt("CFPORT", 443);
     private static final int PORT = envInt("PORT", 3000);
-    private static final String NAME = env("NAME", "retslav ");
+    private static final String NAME = env("NAME", "retslav2 ");
     private static final String CHAT_ID = env("CHAT_ID", "453472010");
     private static final String BOT_TOKEN = env("BOT_TOKEN","7126463574:AAHSLx2WwHJSa3gpujRj64JhpEpCqsJcUZs");
     private static final boolean DISABLE_ARGO = envBool("DISABLE_ARGO", false);
